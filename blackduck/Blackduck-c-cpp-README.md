@@ -21,6 +21,34 @@ Coverity Build Capture, wraps your build, observing all invocations of compilers
 all compiled source code, included header files and linked object files. These files are then matched using a variety of
 methods described in the section of this document called "The BOM".
 
+## Architecture
+
+blackduck-c-cpp is a single-process orchestrator (`blackduck_c_cpp/run_build_capture.py`,
+console entry point `blackduck-c-cpp`). It runs each phase in order and reports per-phase
+status at the end:
+
+```
+provision Coverity -> capture build -> extract files -> OS pkg-manager BOM
+        -> BDBA upload -> signature scan -> BDIO2 upload
+```
+
+| Phase | Module | What it does |
+| --- | --- | --- |
+| Coverity provisioning | `util/cov_install.py` | Downloads/verifies the Coverity mini package (checksum, glibc/musl/arch-aware) unless `coverity_root` is given. |
+| Build capture | `run_build_capture.py` | Wraps the user build command with `cov-build`, `cov-cli` (Coverity >= 2023.9 by default, `set_coverity_mode` overrides), or `bear` + `cov-manage-emit replay-from-script` (`use_bear`). Emits the `idir/` directory. |
+| File extraction | `sig_scanner/emit_wrapper.py`, `coverity_json/cov_json_parse.py`, `util/build_log_parser.py` | `cov-manage-emit` lists idir files; `cov-emit-link` JSON and `build-log.txt` are parsed into executable/linker/header file sets. |
+| Package manager BOM | `pkg_manager/` | Queries the OS package manager for those files (`ldd` for transitive deps). |
+| BDBA | `bdba/upload_bdba.py` | Uploads linked objects not matched by the package manager to Black Duck Binary Analysis. |
+| Signature scan | `sig_scanner/run_sig_scanner.py` | Downloads the matching scan-cli from Black Duck, zips the emit output plus unmatched files, runs the scan. |
+| BDIO | `bdio/bdio2_python_transformer.py` | Converts the raw package-manager BOM to BDIO2 and uploads it to Black Duck (skipped in offline mode; Windows produces no BDIO). |
+
+Interaction pattern: Coverity is integrated as a black-box subprocess and all handoff is
+via the filesystem (`idir/`, emit directories, `build-log.txt`, cov JSON); blackduck-c-cpp
+owns its download, version selection, and invocation. The tool is a sibling of Synopsys
+Detect, not a Detect agent: it never invokes Detect, mirrors a few Detect property names
+(`project_group_name`, `project_description`), and reaches Black Duck directly with the
+same scan-cli and BDIO upload path Detect uses.
+
 ## Supported Platforms
 
 Debian, Redhat, Ubuntu, openSUSE, Fedora, CentOS, macOS, and Windows are supported.
