@@ -1,7 +1,7 @@
 # AOSP 16 — Third-Party License Pipeline: Agent Reference
 
 > **Purpose:** verified ground truth for the "Settings → Legal → Third-party licenses" feature.
-> Read this before investigating the topic. Every claim below was read from source in this checkout.
+> Read this before investigating the topic. Every claim below came from a direct source read in this checkout.
 > **Do not re-derive these. Do not trust the "obvious" names — see [Anti-Rework Index](#1-anti-rework-index--names-that-do-not-exist).**
 
 - **Checkout:** `/home/dinesh/aosp16` (AOSP `android-16.0.0_r4`, `repo` multi-repo, product `vsoc_x86_64_only`)
@@ -10,9 +10,9 @@
 
 ---
 
-## 0. TL;DR mental model
+## 0. TLDR mental model
 
-Licensing is a **build-time data-flow problem, not a runtime one**. Nothing is scraped at runtime.
+Licensing is a **build-time data-flow problem, not a runtime one**. The build does not scrape at runtime.
 
 ```
 declare  →  propagate  →  serialize  →  aggregate  →  install  →  render
@@ -21,8 +21,8 @@ declare  →  propagate  →  serialize  →  aggregate  →  install  →  rend
 
 Two facts that explain most of the design:
 
-1. **Transitivity is free** because licenses are modeled as *Soong dependencies*, not metadata strings.
-2. **Settings cannot render the page itself** because it runs as UID 1000 — rendering is delegated out-of-process.
+1. **Transitivity is free** because Soong models licenses as dependencies, not metadata strings.
+2. **Settings cannot render the page itself** because it runs as UID 1000. Settings delegates rendering to an out-of-process app.
 
 ---
 
@@ -49,7 +49,7 @@ Searches for these will return nothing. They are from legacy Android 4.x-era too
 
 ### ⚠️ Orphaned file — do not edit
 
-`build/make/tools/generate-notice-files.py` (273 lines) has **zero references** from any `.mk`/`.bp`/`.go`. Legacy from 2012. Its logic survives only as a **copy** inside `LicenseHtmlGeneratorFromXml.java`. Editing it changes nothing.
+`build/make/tools/generate-notice-files.py` (273 lines) has **zero references** from any `.mk`/`.bp`/`.go`. Legacy from 2012. Its logic survives as copies inside `frameworks/base/packages/SettingsLib/src/com/android/settingslib/license/LicenseHtmlGeneratorFromXml.java` and Car Settings `packages/apps/Car/Settings/src/com/android/car/settings/system/LicenseHtmlGeneratorFromXml.java`. Editing it changes nothing.
 
 ---
 
@@ -59,7 +59,7 @@ Searches for these will return nothing. They are from legacy Android 4.x-era too
 
 | What | Where |
 |---|---|
-| ~180 `license_kind { name: "SPDX-license-identifier-*" }` modules | `build/soong/licenses/Android.bp:48-1247` |
+| 185 SPDX `license_kind` modules (196 `license_kind` blocks total) | `build/soong/licenses/Android.bp:48-1247` |
 | Custom kinds (e.g. `BSD-Binary-Only`) | `build/soong/licenses/Android.bp:39-46` |
 | `license { name: "Android-Apache-2.0" }` — default for AOSP | `build/soong/licenses/Android.bp:26-32` |
 | `license { name: "opensourcerequest" }` — stub text | `build/soong/licenses/Android.bp:34-37` |
@@ -102,10 +102,10 @@ license {
 
 Precedence order for how a module gets licenses:
 1. Its own `licenses: [...]` — `build/soong/android/module.go:340`
-2. Its package's `default_applicable_licenses` — fallback at `licenses.go:256-266`
+2. Its package's `default_applicable_licenses` — fallback at `build/soong/android/licenses.go:256-266`
 3. `legacy_by_exception_only` if nothing declared (Make side, `build/make/core/notice_files.mk:63`)
 
-`license` module type: `build/soong/android/license.go:44`; properties at `:47-58`.
+`license` module type registers at `build/soong/android/license.go:44`. Its properties are at `:47-58`.
 
 ### Stage 2 — Propagation (the clever part)
 
@@ -126,7 +126,7 @@ Stage 4 - GenerateBuildActions calculates properties for the union of license ki
 | `getLicenses` (property-or-package-default resolution) | 231 |
 | `exemptFromRequiredApplicableLicensesProperty` | 270 |
 
-**Dedup happens at flatten time** — `licenses.go:205-207`:
+**Dedup happens at flatten time** — `build/soong/android/licenses.go:205-207`:
 ```go
 m.base().commonProperties.Effective_license_text        = SortedUniqueNamedPaths(texts)
 m.base().commonProperties.Effective_license_kinds      = SortedUniqueStrings(kinds)
@@ -151,17 +151,18 @@ m.base().commonProperties.Effective_license_conditions = SortedUniqueStrings(con
 | CLI tool | `build/soong/compliance/build_license_metadata/build_license_metadata.go:43` (`main`) |
 | Output path assignment | `build/soong/android/module.go:2133` → `PathForModuleOut(ctx, "meta_lic")` |
 | Invocation site | `build/soong/android/module.go:2317` |
-| Container detection | `license_metadata.go:191` (`isContainerFromFileExtensions`) |
+| Container detection | `build/soong/android/license_metadata.go:191` (`isContainerFromFileExtensions`) |
 
 Proto fields: `package_name`, `module_name`, `module_types`, `module_classes`, `projects`, `license_kinds`, `license_conditions`, `license_texts`, `is_container`, `built`, `installed`, `install_map`, `sources`, `deps`.
 
 Container extensions: `.zip .tar .tgz .tar.gz .img .srcszip .apex .capex`
 
-**Real sample** — `out/soong/.intermediates/packages/modules/Wifi/apex/com.android.wifi/android_common_com.android.wifi/meta_lic`:
+**Real sample (abridged)** — `out/soong/.intermediates/packages/modules/Wifi/apex/com.android.wifi/android_common_com.android.wifi/meta_lic`:
 ```
 package_name: "Android"
 module_name: "com.android.wifi"
 module_types: "apex"
+module_classes: "UNKNOWN"
 projects: "packages/modules/Wifi"
 license_kinds: "SPDX-license-identifier-Apache-2.0"
 license_conditions: "notice"
@@ -170,6 +171,7 @@ license_texts: "build/soong/licenses/opensourcerequest"
 is_container: true
 installed: "out/target/product/vsoc_x86_64_only/system/apex/com.android.wifi.capex"
 ```
+This sample omits many `installed:` and `install_map:` lines.
 
 ### Stage 4a — SQLite aggregation hub (newest architecture, least known)
 
@@ -257,7 +259,7 @@ Policy code (OSPO-gated) in `build/make/tools/compliance/policy_*.go`.
 ```
 Settings → About phone → Legal information
   → packages/apps/Settings/res/xml/about_legal.xml:34   key="license"
-  → LicensePreferenceController.java:23                 Intent("android.settings.LICENSE")
+  → packages/apps/Settings/src/com/android/settings/deviceinfo/legal/LicensePreferenceController.java:23  Intent("android.settings.LICENSE")
   → AndroidManifest.xml:1920                            resolves to SettingsLicenseActivity
 ```
 
@@ -276,10 +278,10 @@ protected void onCreate(Bundle savedInstanceState) {                        // L
 }
 ```
 - `showHtmlFromDefaultXmlFiles()` — L75
-- `FileProvider.getUriForFile(...)` — L81 (authority `com.android.settings.files`)
-- `showHtmlFromUri()` — L94; `intent.setComponent(componentName)` — L109 → `com.android.htmlviewer`
+- `FileProvider.getUriForFile(...)` — L81 (authority `com.android.settings.files`, via `Utils.FILE_PROVIDER_AUTHORITY` at `packages/apps/Settings/src/com/android/settings/Utils.java:149`)
+- `showHtmlFromUri()` runs at L94. The method calls `intent.setComponent(componentName)` at L109 and targets `com.android.htmlviewer`.
 
-**`frameworks/base/packages/SettingsLib/.../license/LicenseHtmlLoaderCompat.java`**
+**`frameworks/base/packages/SettingsLib/src/com/android/settingslib/license/LicenseHtmlLoaderCompat.java`**
 
 ```java
 static final String[] DEFAULT_LICENSE_XML_PATHS = {   // L35-45 — nine partitions
@@ -295,19 +297,19 @@ static final String NOTICE_HTML_FILE_NAME = "NOTICE.html";   // L46
 - `getCachedHtmlFile()` — L91-93 → `context.getCacheDir()/NOTICE.html`
 - `isCachedHtmlFileOutdated()` — L95-107 (mtime comparison against every XML)
 
-**`frameworks/base/packages/SettingsLib/.../license/LicenseHtmlGeneratorFromXml.java`** (445 lines) — the real "parser"
+**`frameworks/base/packages/SettingsLib/src/com/android/settingslib/license/LicenseHtmlGeneratorFromXml.java`** (445 lines) — the real "parser"
 
 | What | Line |
 |---|---|
 | XML tag/attr constants (`licenses`, `file-name`, `file-content`, `contentId`, `lib`) | 54-58 |
 | `mContentIdToFileContentMap` (MD5 → text) | **113** |
-| `mFileNameToLibraryToContentIdMap` (file → lib → MD5) | ~104 |
+| `mFileNameToLibraryToContentIdMap` (file → lib → MD5) | 104 |
 | `generateHtml(List<File>, File, String)` static entry | 128 |
 | `parse(File)` — transparently gunzips `.gz` | 163-189 |
 | `parse(InputStreamReader, ...)` — `XmlPullParser` loop | **207-268** |
 | `generateHtml(...)` — emits TOC + `<pre class="license-text">` | 294+ |
 
-Header comment (L45-51) admits: *"All the HTML snippets and logic are copied from `build/make/tools/generate-notice-files.py`."*
+The header comment at L45-50 states that the class copies all HTML snippets and logic from `build/make/tools/generate-notice-files.py`.
 
 **`packages/apps/HTMLViewer/src/com/android/htmlviewer/HTMLViewerActivity.java`** — the actual WebView
 
@@ -322,32 +324,35 @@ Header comment (L45-51) admits: *"All the HTML snippets and logic are copied fro
 
 | What | Where |
 |---|---|
-| `ModuleLicensesPreferenceController.displayPreference` | `.../deviceinfo/legal/ModuleLicensesPreferenceController.java:43-56` |
-| Filter: module assets must contain `NOTICE.html.gz` | same file, `Predicate.test()` L64-76 |
-| `ModuleLicenseProvider` authority + filenames | `.../deviceinfo/legal/ModuleLicenseProvider.java:46-49` |
+| `ModuleLicensesPreferenceController.displayPreference` | `packages/apps/Settings/src/com/android/settings/deviceinfo/legal/ModuleLicensesPreferenceController.java:43-56` |
+| Filter: module assets must contain `NOTICE.html.gz` | same file, `Predicate.test()` L65-73 |
+| `ModuleLicenseProvider` authority + filenames | `packages/apps/Settings/src/com/android/settings/deviceinfo/legal/ModuleLicenseProvider.java:46-49` |
 | `openFile()` — gunzips APEX asset into cache | **85-117** |
 | `checkUri()` — strict validation | 154-176 |
-| Click handler + UID-1000 comment | `ModuleLicensePreference.java:44-63` |
+| Click handler + UID-1000 comment | `packages/apps/Settings/src/com/android/settings/deviceinfo/legal/ModuleLicensePreference.java:44-63` |
 
 ---
 
 ## 3. Measured facts from THIS build
 
-Product `aosp_cf_x86_64_only_phone` / `vsoc_x86_64_only`, soong-only.
+The output product is `vsoc_x86_64_only`. The compliance DB uses `aosp_cf_x86_64_only_phone`. This build uses Soong only.
 
 | Artifact | Value |
 |---|---|
 | `meta_lic` textprotos | **20,055** |
-| `compliance-metadata.db` | **188 MB** |
-| `modules.csv` | **164 MB** |
+| `compliance-metadata.db` | **188,628,992 B (188 MB)** |
+| `modules.csv` | **164,033,350 B (164 MB)** |
 | `system/etc/NOTICE.xml.gz` | 348,883 B — **2,600** `<file-name>` / **329** `<file-content>` (≈7.9:1 dedup) |
 | `product/etc/NOTICE.xml.gz` | 201,645 B |
 | `vendor/etc/NOTICE.xml.gz` | 93,228 B |
 | `system_ext/etc/NOTICE.xml.gz` | 71,738 B |
-| + `odm`, `vendor_dlkm`, `system_dlkm`, `odm_dlkm` | 4–5 KB each |
+| `odm/etc/NOTICE.xml.gz` | 4,767 B |
+| `vendor_dlkm/etc/NOTICE.xml.gz` | 4,215 B |
+| `system_dlkm/etc/NOTICE.xml.gz` | 4,213 B |
+| `odm_dlkm/etc/NOTICE.xml.gz` | 4,213 B |
 | Host tools built | `build_license_metadata`, `gen_notice_xml`, `htmlnotice`, `textnotice` |
 
-**`/system/etc/NOTICE.html.gz` does NOT exist** in this build. Confirmed by direct check. This is why the on-device XML→HTML generation path runs.
+**`/system/etc/NOTICE.html.gz` does NOT exist** in this build. A direct check shows this. This is why the on-device XML→HTML generation path runs.
 
 Sample XML structure:
 ```xml
@@ -361,23 +366,23 @@ The `67459f64...` content ID is the `opensourcerequest` stub from `build/soong/l
 
 ## 4. Key design constraints (the "why")
 
-1. **MD5 is the dedup key everywhere** — `noticeindex.go:528`, `gen_notice_xml.py:91`, and the `contentId` XML attribute. **For identity, not security.** Do not "fix" it by switching to SHA-256 for security reasons; it is not a security boundary.
+1. **MD5 is the dedup key everywhere** — `build/make/tools/compliance/noticeindex.go:528`, `build/make/tools/sbom/gen_notice_xml.py:91`, and the `contentId` XML attribute. **For identity, not security.** Do not replace it by switching to SHA-256 for security reasons. It is not a security boundary.
 
-2. **Settings runs as UID 1000 (`android.uid.system`).** Hosting a WebView there is a security risk, so rendering is delegated out-of-process to the unprivileged `com.android.htmlviewer` app. This is stated explicitly in source comments in both `SettingsLicenseActivity` and `ModuleLicensePreference`. **Any proposal to render licenses inside Settings is blocked by this.**
+2. **Settings runs as UID 1000 (`android.uid.system`).** Hosting a WebView there creates a security risk. Settings delegates rendering to the unprivileged `com.android.htmlviewer` app. Source comments in both `SettingsLicenseActivity` and `ModuleLicensePreference` state this explicitly. **This UID blocks any proposal to render licenses inside Settings.**
 
 3. **Two parallel HTML generation paths exist and share NO code:**
-   - Monolithic → `gen_notice_xml.py` (build) + `LicenseHtmlGeneratorFromXml.java` (device)
+   - Monolithic → `build/make/tools/sbom/gen_notice_xml.py` (build) + `frameworks/base/packages/SettingsLib/src/com/android/settingslib/license/LicenseHtmlGeneratorFromXml.java` (device)
    - Per-APEX → `htmlnotice` Go tool (build), pre-rendered into APEX assets
 
 4. **`DISABLE_NOTICE_XML_GENERATION`** — `build/soong/android/config.go:1801-1802`, checked at `build/soong/compliance/notice.go:79`. **If licenses suddenly vanish from a build, check this env var first.**
 
-5. **AOSP 16 has a Kotlin "Catalyst" twin** of the legal screens, kept in sync with the Java via `// LINT.IfChange` / `// LINT.ThenChange` pairs:
-   - `LegalSettingsScreen.kt:42` — `isFlagEnabled() = Flags.catalystLegalInformation()`
-   - `LegalSettingsScreen.kt:49` — `+LegalPreference("license", R.string.license_title, "android.settings.LICENSE")`
-   - **If you change the Java `LegalPreferenceController` you must change the Kotlin `LegalPreference` too, or lint fails.**
-   - `ModuleLicensesScreen.kt` has `isFlagEnabled() = false` with comment *"Let system render the legacy UI"* — module licenses still uses the Java `ModuleLicensesDashboard`.
+5. **AOSP 16 has a Kotlin "Catalyst" twin** of the legal screens. LINT pairs:
+   - `packages/apps/Settings/src/com/android/settings/deviceinfo/legal/LegalSettingsScreen.kt:42` — `isFlagEnabled(context) = Flags.catalystLegalInformation()`
+   - `packages/apps/Settings/src/com/android/settings/deviceinfo/legal/LegalSettingsScreen.kt:49` — `+LegalPreference("license", R.string.license_title, "android.settings.LICENSE")`
+   - `packages/apps/Settings/src/com/android/settings/deviceinfo/legal/LegalSettingsScreen.kt` has no LINT block. LINT pairs: `packages/apps/Settings/src/com/android/settings/deviceinfo/legal/LegalPreference.kt:27/58` and `packages/apps/Settings/src/com/android/settings/deviceinfo/legal/LegalPreferenceController.java:30/98`. Another pair: `packages/apps/Settings/src/com/android/settings/deviceinfo/legal/ModuleLicensesScreen.kt:28/70` and `packages/apps/Settings/src/com/android/settings/deviceinfo/legal/ModuleLicensesListPreferenceController.java:27/43`.
+   - `packages/apps/Settings/src/com/android/settings/deviceinfo/legal/ModuleLicensesScreen.kt:46` — `isFlagEnabled(context) = false`. Comment at L44-45 says "Let system render the legacy UI". `fragmentClass()` at L48 is `ModuleLicensesDashboard`.
 
-6. **Reproducible builds** — `gen_notice_xml.py:225` uses `gzip(..., mtime=0)`.
+6. **Reproducible builds** — `build/make/tools/sbom/gen_notice_xml.py:225` uses `gzip(..., mtime=0)`.
 
 ---
 
@@ -389,14 +394,14 @@ The `67459f64...` content ID is the `opensourcerequest` stub from `build/soong/l
 | `define text-notice-rule` | `build/make/core/Makefile:1878` |
 | `define html-notice-rule` | `build/make/core/Makefile:1894` |
 | `ifeq (,$(DISABLE_NOTICE_XML_GENERATION))` block | `build/make/core/Makefile:1941-1961` |
-| Partition bucketing of license modules | `build/make/core/Makefile:1974-1996` |
+| Partition bucketing of license modules | `build/make/core/Makefile:1974-1996` — **source bug:** L1983 overwrites `license_modules_odm_dlkm` with `TARGET_OUT_SYSTEM_DLKM`. L1991 references undefined `license_modules_system_dlkm`. |
 | `corresponding-license-metadata` | `build/make/core/definitions.mk:561` |
-| `declare-license-metadata` | `build/make/core/definitions.mk:588` |
+| `declare-license-metadata` | `build/make/core/definitions.mk:768` |
 | `declare-container-license-metadata` | `build/make/core/definitions.mk:809` |
-| `declare-1p-target` (canonical "this is AOSP Apache-2.0") | `build/make/core/definitions.mk:836` |
-| `report-missing-licenses-rule` | `build/make/core/definitions.mk:~903` |
+| `declare-1p-target` (canonical "this is AOSP Apache-2.0") | `build/make/core/definitions.mk:841` |
+| `report-missing-licenses-rule` | `build/make/core/definitions.mk:903` |
 | Per-partition phony targets (`systemlicense`, `vendorlicense`, …) | `build/make/core/os_licensing.mk` |
-| `$(call build-license-metadata)` — must run **after** `fix-notice-deps` | `build/make/core/main.mk:1663-1666` |
+| `$(call build-license-metadata)` — must run **after** `fix-notice-deps` | `build/make/core/main.mk:1665` |
 
 androidmk conversion map (`build/soong/androidmk/androidmk/android.go`):
 ```
@@ -425,7 +430,7 @@ Note: `android_license_kinds` / `android_license_files` are **androidmk-converte
 
 SettingsLib: `frameworks/base/packages/SettingsLib/res/values/strings.xml:1483` — `notice_header` is **empty** (`translatable="false"`).
 
-Intent actions that exist: `android.settings.LICENSE`, `android.settings.MODULE_LICENSES`, `android.settings.COPYRIGHT`, `android.settings.TERMS`, `android.settings.WEBVIEW_LICENSE`.
+`packages/apps/Settings/AndroidManifest.xml:1920` declares `android.settings.LICENSE`. `packages/apps/Settings/AndroidManifest.xml:1931` declares `android.settings.MODULE_LICENSES`. The legal controllers emit `android.settings.COPYRIGHT`, `android.settings.TERMS`, and `android.settings.WEBVIEW_LICENSE`, but the manifest does not declare these actions.
 
 ---
 
@@ -434,29 +439,29 @@ Intent actions that exist: `android.settings.LICENSE`, `android.settings.MODULE_
 ```
 Android.bp: package{default_applicable_licenses} + license{} + license_kind{}
     │
-    │ Stage1 licensesPackageMapper        licenses.go:121
-    │ Stage2 licensesPropertyGatherer     licenses.go:143
-    │ Stage3/4 licensesPropertyFlattener licenses.go:176
-    │            → Effective_license_{text,kinds,conditions}   module.go:343-349
+    │ Stage1 licensesPackageMapper        build/soong/android/licenses.go:121
+    │ Stage2 licensesPropertyGatherer     build/soong/android/licenses.go:143
+    │ Stage3/4 licensesPropertyFlattener build/soong/android/licenses.go:176
+    │            → Effective_license_{text,kinds,conditions}   build/soong/android/module.go:343-349
     ▼
-buildLicenseMetadata (license_metadata.go:39) → build_license_metadata CLI
+buildLicenseMetadata (build/soong/android/license_metadata.go:39) → build_license_metadata CLI
     → out/soong/.intermediates/<mod>/<variant>/meta_lic        [20,055 textprotos]
     │
-    ├──► complianceMetadataSingleton (compliance_metadata.go:333)
+    ├──► complianceMetadataSingleton (build/soong/android/compliance_metadata.go:333)
     │       modules.csv → importCsv/sqlite3 (:307) → compliance-metadata.db (188MB)
-    │            ├──► notice_xml (compliance/notice.go:47) → gen_notice_xml.py
+    │            ├──► notice_xml module type (build/soong/compliance/notice.go:38) / genNoticeXmlRule (:47) → build/make/tools/sbom/gen_notice_xml.py
     │            │      → <partition>/etc/NOTICE.xml.gz   [2600 names / 329 contents]
-    │            └──► sbom_singleton (sbom.go:41) → sbom.spdx.json
+    │            └──► sbom_singleton (build/soong/android/sbom.go:41) → sbom.spdx.json
     │
-    └──► genNoticeBuildRules (gen_notice.go:38) → htmlnotice
-           ReadLicenseGraph(:206) → ResolveNotices(:215) → IndexLicenseTexts(:217)
+    └──► genNoticeBuildRules (build/soong/android/gen_notice.go:38) → htmlnotice
+           build/make/tools/compliance/cmd/htmlnotice/htmlnotice.go:206 → :215 ResolveNotices → :217 IndexLicenseTexts
            → per-APEX NOTICE.html.gz  (into APEX assets)
 
                     ═══════════ device boot ═══════════
 
 Settings → About phone → Legal information → "License"
-  └─ about_legal.xml:34 → LicensePreferenceController:23
-       └─ Intent("android.settings.LICENSE") → Manifest:1920
+  └─ packages/apps/Settings/res/xml/about_legal.xml:34 → packages/apps/Settings/src/com/android/settings/deviceinfo/legal/LicensePreferenceController.java:23
+       └─ Intent("android.settings.LICENSE") → packages/apps/Settings/AndroidManifest.xml:1920
             └─ SettingsLicenseActivity
                  ├─ /system/etc/NOTICE.html.gz?  → ABSENT on AOSP 16
                  └─ showHtmlFromDefaultXmlFiles()  (:75)
@@ -471,7 +476,7 @@ Settings → About phone → Legal information → "License"
 
 ---
 
-## 8. How to re-verify quickly
+## 8. How to check quickly
 
 ```bash
 cd /home/dinesh/aosp16
@@ -488,7 +493,7 @@ zcat out/target/product/vsoc_x86_64_only/system/etc/NOTICE.xml.gz | grep -c '<fi
 sqlite3 out/soong/compliance-metadata/aosp_cf_x86_64_only_phone/compliance-metadata.db \
   ".tables" ".schema modules"
 
-# Confirm NOTICE.html.gz is absent (proves the XML path runs)
+# Check that NOTICE.html.gz is absent (proves the XML path runs)
 ls out/target/product/*/system/etc/NOTICE.html.gz   # → No such file
 
 # Trace a single license from declaration to output
@@ -510,9 +515,9 @@ AOSP `refs/tags/android-16.0.0_r4`. Root is **not** a git repo — it is a `repo
 | `packages/apps/HTMLViewer` | `baa35c607e99e00199ade178da644f4e7ef5bc41` |
 | `external/zlib` | `a6f47e8bd7c1ba412c4b5a3539aa77fe628d0172` |
 
-Remote: `aosp` → `https://android.googlesource.com/` (fetch `..`)
+Remote: `aosp` points to `https://android.googlesource.com/`. The repo pulls `..`.
 
-**Note for tooling:** because there is no single git root, tools that verify source evidence against one pinned repo cannot validate cross-project citations here. Line numbers in this doc were verified by direct file reads, not git verification.
+**Note for tooling:** Because there is no single git root, tools that check source evidence against one pinned repo cannot check cross-project citations here. Direct file reads checked line numbers in this doc. Git did not check them.
 
 ---
 
@@ -545,12 +550,12 @@ Use a **fresh `--out-dir`** each run — the previous HTML owns its browser evid
 |---|---|
 | Add a new license kind | `build/soong/licenses/Android.bp` (add `license_kind`) |
 | Fix a wrong license on a module | That module's `Android.bp` `licenses:` or its `package{}` default |
-| Change the rendered HTML layout | `LicenseHtmlGeneratorFromXml.java` (device) — **not** the orphaned `.py` |
-| Change what gets deduped | `gen_notice_xml.py:209-220` (monolithic) or `noticeindex.go:528` (per-APEX) |
-| Add a new legal preference row | `about_legal.xml` **AND** `LegalSettingsScreen.kt` (LINT-synced) |
-| Change WebView hardening | `HTMLViewerActivity.java:78-83` |
+| Change the rendered HTML layout | `frameworks/base/packages/SettingsLib/src/com/android/settingslib/license/LicenseHtmlGeneratorFromXml.java` (device) — **not** the orphaned `.py` |
+| Change what gets deduped | `build/make/tools/sbom/gen_notice_xml.py:209-220` (monolithic) or `build/make/tools/compliance/noticeindex.go:528` (per-APEX) |
+| Add a new legal preference row | `packages/apps/Settings/res/xml/about_legal.xml` (Java fragment) **AND** `packages/apps/Settings/src/com/android/settings/deviceinfo/legal/LegalSettingsScreen.kt` / `packages/apps/Settings/src/com/android/settings/deviceinfo/legal/LegalPreference.kt` (Kotlin catalyst) |
+| Change WebView hardening | `packages/apps/HTMLViewer/src/com/android/htmlviewer/HTMLViewerActivity.java:78-83` |
 | Licenses missing from device | Check `DISABLE_NOTICE_XML_GENERATION`, then `reportmissinglicenses` |
 
 ---
 
-*Generated 2026-10-22. Every line number read directly from source in this checkout. If you find a drift, correct this file rather than leaving a comment elsewhere.*
+*Generated 2026-10-22. Every line number read directly from source in this checkout. If you find a drift, fix this file rather than leave a comment elsewhere.*
